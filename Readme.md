@@ -7,6 +7,8 @@ REST API calls.
 
 It's a header only thread safe library written in C++ 17 with only one dependency.
 
+[Documentation](https://github.com/violanes/muskrat_http/blob/master/Docs.md) | [Examples](https://github.com/violanes/muskrat_http/blob/master/examples)
+
 ### Features
 - Ability to send custom request headers
 - Ability to set cookies
