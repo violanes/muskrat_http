@@ -9,10 +9,12 @@
 #include <thread>
 
 namespace muskrat {
+    using post_fields_t = const std::unordered_map<std::string, std::string>&;
+
     namespace util {
         template<typename T>
-        std::string to_str(T value) { return std::to_string(value); }
-        std::string to_str(const std::string& value) { return value; }
+        inline std::string to_str(T value) { return std::to_string(value); }
+        inline std::string to_str(const std::string& value) { return value; }
     }
 
     class c_http_response {
@@ -24,7 +26,7 @@ namespace muskrat {
 
         [[nodiscard]] bool is_redirect() const {
             return (m_http_status == 302 || m_http_status == 301 || m_http_status == 303 || m_http_status == 307
-                || m_http_status == 308);
+                    || m_http_status == 308);
         }
 
         [[nodiscard]] bool is_successful() const { return m_successful; }
@@ -63,7 +65,7 @@ namespace muskrat {
             }
 
             m_successful = !(m_http_status == 404 || m_http_status == 500 || m_http_status == 419
-                || m_http_status == 429);
+                             || m_http_status == 429);
         }
 
         bool m_successful = false;
@@ -76,8 +78,10 @@ namespace muskrat {
 
     class c_basic_request {
     public:
-        std::shared_ptr<c_http_response> post(std::string_view url);
-        std::shared_ptr<c_http_response> get(std::string_view url);
+        inline std::shared_ptr<c_http_response> post(std::string_view url);
+        inline std::shared_ptr<c_http_response> get(std::string_view url);
+
+        inline std::shared_ptr<c_http_response> post(std::string_view url, post_fields_t params);
 
         c_basic_request* retry(uint32_t attempts, uint64_t delay) {
             m_retry_attempts = attempts;
@@ -124,7 +128,7 @@ namespace muskrat {
         template<typename T>
         c_basic_request* with_header(std::string_view name, T value) {
             static_assert(std::is_fundamental<T>::value || std::is_same<T, std::string>::value,
-                    "Header value can only be of a basic type or an STL string");
+                          "Header value can only be of a basic type or an STL string");
             m_headers[name.data()] = util::to_str(value);
             return this;
         }
@@ -166,10 +170,10 @@ namespace muskrat {
 
     class c_http_lib : public c_basic_request {
     public:
-        std::shared_ptr<c_http_response> attempt(std::string_view url, bool post) {
+        std::shared_ptr<c_http_response> attempt(std::string_view url, bool post, post_fields_t fields = {}) {
             m_retry_attempts = std::max(m_retry_attempts, (uint32_t)1);
             while (m_retry_attempts--) {
-                auto response = request(url, post);
+                auto response = request(url, post, fields);
                 if (response->is_successful())
                     return response;
 
@@ -179,7 +183,7 @@ namespace muskrat {
             return std::make_shared<c_http_response>("", "");
         }
     private:
-        std::shared_ptr<c_http_response> request(std::string_view url, bool post) {
+        std::shared_ptr<c_http_response> request(std::string_view url, bool post, post_fields_t fields = {}) {
             auto handle = curl_easy_init();
             if (!handle)
                 return std::make_shared<c_http_response>("", "");
@@ -187,11 +191,18 @@ namespace muskrat {
             struct curl_slist* header_list = nullptr;
             for (const auto& field : m_headers) {
                 header_list = curl_slist_append(header_list,
-                    std::string(field.first).append(": ").append(field.second).c_str());
+                                                std::string(field.first).append(": ").append(field.second).c_str());
             }
 
             std::string body{};
             std::string headers{};
+
+            std::string request_string{};
+            std::for_each(fields.begin(), fields.end(), [&request_string](const auto& field) {
+                request_string.append(field.first).append("=").append(field.second).append("&");
+            });
+            if (!request_string.empty())
+                request_string.pop_back();
 
             curl_easy_setopt(handle, CURLOPT_HTTPHEADER, header_list);
             curl_easy_setopt(handle, CURLOPT_URL, url.data());
@@ -222,8 +233,14 @@ namespace muskrat {
 
             if (post) {
                 curl_easy_setopt(handle, CURLOPT_POST, 1);
-                curl_easy_setopt(handle, CURLOPT_POSTFIELDS, m_body.c_str());
-                curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, m_body.size());
+
+                if (request_string.empty()) {
+                    curl_easy_setopt(handle, CURLOPT_POSTFIELDS, m_body.c_str());
+                    curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, m_body.length());
+                } else {
+                    curl_easy_setopt(handle, CURLOPT_POSTFIELDS, request_string.c_str());
+                    curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE, request_string.length());
+                }
             }
             else
                 curl_easy_setopt(handle, CURLOPT_HTTPGET, 1);
@@ -238,12 +255,16 @@ namespace muskrat {
         }
     };
 
-    std::shared_ptr<c_http_response> c_basic_request::post(std::string_view url) {
+    inline std::shared_ptr<c_http_response> c_basic_request::post(std::string_view url) {
         return ((c_http_lib*)this)->attempt(url, true);
     }
 
-    std::shared_ptr<c_http_response> c_basic_request::get(std::string_view url) {
+    inline std::shared_ptr<c_http_response> c_basic_request::get(std::string_view url) {
         return ((c_http_lib*)this)->attempt(url, false);
+    }
+
+    inline std::shared_ptr<c_http_response> c_basic_request::post(std::string_view url, post_fields_t params) {
+        return ((c_http_lib*)this)->attempt(url, true, params);
     }
 
     static std::shared_ptr<c_http_lib> http() {

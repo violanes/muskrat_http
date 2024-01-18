@@ -27,6 +27,18 @@ muskrat::http()
     ->post("https://github.com");
 ```
 
+### Post Fields
+To send a post params as separate fields instead of encoded body, provide a list of pairs of key/value to the post function. 
+The format of that list is `std::unordered_map<std::string, std::string>`.
+
+The code of a simple post request: 
+```c++
+muskrat::http()->post("https://github.com/something", {
+    { "field", "value" },
+    { "another_field", "someValue" }
+});
+```
+
 ### Cookies
 Request cookies can be sent two ways: by a string or by key/values pairs
 
